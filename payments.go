@@ -1,6 +1,7 @@
 package cashbill
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha1"
 	"encoding/hex"
@@ -8,7 +9,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"strings"
 )
 
 const (
@@ -18,7 +18,7 @@ const (
 
 type API interface {
 	RequestPayment(ctx context.Context, newPayment NewPayment) (PaymentRequest, error)
-	GetPayment(ctx context.Context, get GetPayment) (Payment, error)
+	GetPayment(ctx context.Context, paymentID string) (Payment, error)
 }
 
 func NewAPI(shopID, secret string) API {
@@ -48,18 +48,19 @@ type NewPayment struct {
 }
 
 func (n NewPayment) sign(secret string) string {
-	hasher := sha1.New()
-	hasher.Write([]byte(n.Title))
-	hasher.Write([]byte(n.Amount))
-	hasher.Write([]byte(n.Currency))
-	hasher.Write([]byte(n.ReturnURL))
-	hasher.Write([]byte(n.Description))
-	hasher.Write([]byte(n.NegativeReturnURL))
-	hasher.Write([]byte(n.AdditionalData))
-	hasher.Write([]byte(n.PaymentChannel))
-	hasher.Write([]byte(n.LanguageCode))
-	hasher.Write([]byte(n.Referer))
-	return hex.EncodeToString(hasher.Sum([]byte(secret)))
+	h := sha1.New()
+	h.Write([]byte(n.Title))
+	h.Write([]byte(n.Amount))
+	h.Write([]byte(n.Currency))
+	h.Write([]byte(n.ReturnURL))
+	h.Write([]byte(n.Description))
+	h.Write([]byte(n.NegativeReturnURL))
+	h.Write([]byte(n.AdditionalData))
+	h.Write([]byte(n.PaymentChannel))
+	h.Write([]byte(n.LanguageCode))
+	h.Write([]byte(n.Referer))
+	h.Write([]byte(secret))
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 func (n NewPayment) valuesWithSign(secret string) url.Values {
@@ -87,7 +88,10 @@ type PaymentRequest struct {
 
 func (api *api) RequestPayment(ctx context.Context, newPayment NewPayment) (PaymentRequest, error) {
 	postForm := newPayment.valuesWithSign(api.Secret)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, api.URL+"/payment/"+api.ShopID, strings.NewReader(postForm.Encode()))
+
+	fmt.Println(postForm.Encode())
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, api.URL+"/payment/"+api.ShopID, bytes.NewBufferString(postForm.Encode()))
 	if err != nil {
 		return PaymentRequest{}, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -109,19 +113,13 @@ func (api *api) RequestPayment(ctx context.Context, newPayment NewPayment) (Paym
 	return payment, nil
 }
 
-type GetPayment struct {
-	PaymentID string
-	Signature string
-}
-
-func (g GetPayment) sign(secret string) string {
+func (api *api) GetPayment(ctx context.Context, paymentID string) (Payment, error) {
 	h := sha1.New()
-	h.Write([]byte(g.PaymentID))
-	return hex.EncodeToString(h.Sum([]byte(secret)))
-}
+	h.Write([]byte(paymentID))
+	h.Write([]byte(api.Secret))
+	sign := hex.EncodeToString(h.Sum(nil))
 
-func (api *api) GetPayment(ctx context.Context, get GetPayment) (Payment, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, api.URL+"/payment/"+api.ShopID+"/"+get.PaymentID+"?sign="+get.sign(api.Secret), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, api.URL+"/payment/"+api.ShopID+"/"+paymentID+"?sign="+sign, nil)
 	if err != nil {
 		return Payment{}, fmt.Errorf("failed to create request: %w", err)
 	}
