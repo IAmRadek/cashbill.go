@@ -1,12 +1,14 @@
 package cashbill
 
 import (
+	"context"
 	"crypto/sha1"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 )
 
 const (
@@ -15,8 +17,8 @@ const (
 )
 
 type API interface {
-	RequestPayment(newPayment NewPayment) (PaymentRequest, error)
-	GetPayment(get GetPayment) (Payment, error)
+	RequestPayment(ctx context.Context, newPayment NewPayment) (PaymentRequest, error)
+	GetPayment(ctx context.Context, get GetPayment) (Payment, error)
 }
 
 func NewAPI(shopID, secret string) API {
@@ -83,9 +85,15 @@ type PaymentRequest struct {
 	ReturnURL string `json:"returnUrl"`
 }
 
-func (api *api) RequestPayment(newPayment NewPayment) (PaymentRequest, error) {
+func (api *api) RequestPayment(ctx context.Context, newPayment NewPayment) (PaymentRequest, error) {
 	postForm := newPayment.valuesWithSign(api.Secret)
-	resp, err := http.PostForm(api.URL+"/payment/"+api.ShopID, postForm)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, api.URL+"/payment/"+api.ShopID, strings.NewReader(postForm.Encode()))
+	if err != nil {
+		return PaymentRequest{}, fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
+
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return PaymentRequest{}, fmt.Errorf("failed to call cashbill: %w", err)
 	}
@@ -107,13 +115,18 @@ type GetPayment struct {
 }
 
 func (g GetPayment) sign(secret string) string {
-	hasher := sha1.New()
-	hasher.Write([]byte(g.PaymentID))
-	return hex.EncodeToString(hasher.Sum([]byte(secret)))
+	h := sha1.New()
+	h.Write([]byte(g.PaymentID))
+	return hex.EncodeToString(h.Sum([]byte(secret)))
 }
 
-func (api *api) GetPayment(get GetPayment) (Payment, error) {
-	resp, err := http.Get(api.URL + "/payment/" + api.ShopID + "/" + get.PaymentID + "?sign=" + get.sign(api.Secret))
+func (api *api) GetPayment(ctx context.Context, get GetPayment) (Payment, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, api.URL+"/payment/"+api.ShopID+"/"+get.PaymentID+"?sign="+get.sign(api.Secret), nil)
+	if err != nil {
+		return Payment{}, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return Payment{}, fmt.Errorf("failed to call cashbill: %w", err)
 	}
