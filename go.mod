@@ -1,3 +1,3 @@
-module github.com/IAmRadek/go-cashbill
+module github.com/IAmRadek/cashbill.go
 
 go 1.17
