@@ -3,7 +3,9 @@ package cashbill
 import (
 	"bytes"
 	"context"
+	"crypto/md5"
 	"crypto/sha1"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -16,16 +18,11 @@ const (
 	testURL = "https://pay.cashbill.pl/testws/rest"
 )
 
-type API interface {
-	RequestPayment(ctx context.Context, newPayment NewPayment) (PaymentRequest, error)
-	GetPayment(ctx context.Context, paymentID string) (Payment, error)
-}
-
-func NewAPI(shopID, secret string, opts ...Option) API {
-	a := &api{
-		URL:    prodURL,
-		ShopID: shopID,
-		Secret: secret,
+func NewAPI(shopID, secret string, opts ...Option) *Client {
+	a := &Client{
+		url:    prodURL,
+		shopID: shopID,
+		secret: secret,
 		client: http.DefaultClient,
 	}
 	for _, opt := range opts {
@@ -34,11 +31,11 @@ func NewAPI(shopID, secret string, opts ...Option) API {
 	return a
 }
 
-func NewTestAPI(shopID, secret string, opts ...Option) API {
-	a := &api{
-		URL:    testURL,
-		ShopID: shopID,
-		Secret: secret,
+func NewTestAPI(shopID, secret string, opts ...Option) *Client {
+	a := &Client{
+		url:    testURL,
+		shopID: shopID,
+		secret: secret,
 		client: http.DefaultClient,
 	}
 	for _, opt := range opts {
@@ -47,19 +44,19 @@ func NewTestAPI(shopID, secret string, opts ...Option) API {
 	return a
 }
 
-type api struct {
-	URL    string
-	ShopID string
-	Secret string
+type Client struct {
+	url    string
+	shopID string
+	secret string
 	client *http.Client
 }
 
 // Option is a function that configures the API
-type Option func(*api)
+type Option func(*Client)
 
 // WithHTTPClient sets a custom HTTP client for the API
 func WithHTTPClient(client *http.Client) Option {
-	return func(a *api) {
+	return func(a *Client) {
 		a.client = client
 	}
 }
@@ -116,10 +113,10 @@ type PaymentRequest struct {
 	RedirectURL string `json:"redirectUrl"`
 }
 
-func (api *api) RequestPayment(ctx context.Context, newPayment NewPayment) (PaymentRequest, error) {
-	postForm := newPayment.valuesWithSign(api.Secret)
+func (api *Client) RequestPayment(ctx context.Context, newPayment NewPayment) (PaymentRequest, error) {
+	postForm := newPayment.valuesWithSign(api.secret)
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, api.URL+"/payment/"+api.ShopID, bytes.NewBufferString(postForm.Encode()))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, api.url+"/payment/"+api.shopID, bytes.NewBufferString(postForm.Encode()))
 	if err != nil {
 		return PaymentRequest{}, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -141,13 +138,13 @@ func (api *api) RequestPayment(ctx context.Context, newPayment NewPayment) (Paym
 	return payment, nil
 }
 
-func (api *api) GetPayment(ctx context.Context, paymentID string) (Payment, error) {
+func (api *Client) GetPayment(ctx context.Context, paymentID string) (Payment, error) {
 	h := sha1.New()
 	h.Write([]byte(paymentID))
-	h.Write([]byte(api.Secret))
+	h.Write([]byte(api.secret))
 	sign := hex.EncodeToString(h.Sum(nil))
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, api.URL+"/payment/"+api.ShopID+"/"+paymentID+"?sign="+sign, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, api.url+"/payment/"+api.shopID+"/"+paymentID+"?sign="+sign, nil)
 	if err != nil {
 		return Payment{}, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -166,4 +163,25 @@ func (api *api) GetPayment(ctx context.Context, paymentID string) (Payment, erro
 	}
 
 	return payment, nil
+}
+
+func (api *Client) VerifyCallback(r *http.Request) (Payment, error) {
+	q := r.URL.Query()
+
+	cmd := q.Get("cmd")
+	arg := q.Get("args")
+	sig := q.Get("sign")
+
+	local := md5Hash(cmd + arg + api.secret)
+
+	if subtle.ConstantTimeCompare(local, []byte(sig)) != 0 {
+		return Payment{}, fmt.Errorf("invalid signature")
+	}
+
+	return api.GetPayment(r.Context(), arg)
+}
+
+func md5Hash(s string) []byte {
+	hash := md5.New()
+	return hash.Sum([]byte(s))
 }
