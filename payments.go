@@ -112,8 +112,8 @@ func (n NewPayment) valuesWithSign(secret string) url.Values {
 }
 
 type PaymentRequest struct {
-	ID        string `json:"id"`
-	ReturnURL string `json:"returnUrl"`
+	ID          string `json:"id"`
+	RedirectURL string `json:"redirectUrl"`
 }
 
 func (api *api) RequestPayment(ctx context.Context, newPayment NewPayment) (PaymentRequest, error) {
