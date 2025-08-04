@@ -21,17 +21,47 @@ type API interface {
 	GetPayment(ctx context.Context, paymentID string) (Payment, error)
 }
 
-func NewAPI(shopID, secret string) API {
-	return &api{prodURL, shopID, secret}
+func NewAPI(shopID, secret string, opts ...Option) API {
+	a := &api{
+		URL:    prodURL,
+		ShopID: shopID,
+		Secret: secret,
+		client: http.DefaultClient,
+	}
+	for _, opt := range opts {
+		opt(a)
+	}
+	return a
 }
-func NewTestAPI(shopID, secret string) API {
-	return &api{testURL, shopID, secret}
+
+func NewTestAPI(shopID, secret string, opts ...Option) API {
+	a := &api{
+		URL:    testURL,
+		ShopID: shopID,
+		Secret: secret,
+		client: http.DefaultClient,
+	}
+	for _, opt := range opts {
+		opt(a)
+	}
+	return a
 }
 
 type api struct {
 	URL    string
 	ShopID string
 	Secret string
+	client *http.Client
+}
+
+// Option is a function that configures the API
+type Option func(*api)
+
+// WithHTTPClient sets a custom HTTP client for the API
+func WithHTTPClient(client *http.Client) Option {
+	return func(a *api) {
+		a.client = client
+	}
 }
 
 type NewPayment struct {
@@ -89,15 +119,13 @@ type PaymentRequest struct {
 func (api *api) RequestPayment(ctx context.Context, newPayment NewPayment) (PaymentRequest, error) {
 	postForm := newPayment.valuesWithSign(api.Secret)
 
-	fmt.Println(postForm.Encode())
-
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, api.URL+"/payment/"+api.ShopID, bytes.NewBufferString(postForm.Encode()))
 	if err != nil {
 		return PaymentRequest{}, fmt.Errorf("failed to create request: %w", err)
 	}
 	req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := api.client.Do(req)
 	if err != nil {
 		return PaymentRequest{}, fmt.Errorf("failed to call cashbill: %w", err)
 	}
@@ -124,7 +152,7 @@ func (api *api) GetPayment(ctx context.Context, paymentID string) (Payment, erro
 		return Payment{}, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := api.client.Do(req)
 	if err != nil {
 		return Payment{}, fmt.Errorf("failed to call cashbill: %w", err)
 	}
