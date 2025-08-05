@@ -38,8 +38,8 @@ func (p Payment) IsPaid() bool {
 }
 
 type Amount struct {
-	Amount   string `json:"amount"`
-	Currency string `json:"currency"`
+	Amount   string `json:"value"`
+	Currency string `json:"currencyCode"`
 }
 
 type PersonalData struct {
