@@ -1,5 +1,9 @@
 package cashbill
 
+import (
+	"encoding/json"
+)
+
 type Status string
 
 const (
@@ -38,8 +42,8 @@ func (p Payment) IsPaid() bool {
 }
 
 type Amount struct {
-	Amount   string `json:"value"`
-	Currency string `json:"currencyCode"`
+	Amount   json.Number `json:"value"`
+	Currency string      `json:"currencyCode"`
 }
 
 type PersonalData struct {
